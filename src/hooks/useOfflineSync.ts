@@ -1,6 +1,7 @@
 import { useEffect, useCallback } from 'react';
 import { useOnlineStatus } from './useOnlineStatus';
 import { getUnsyncedQueueItemsDB, markQueueItemSyncedDB, clearSyncedQueueItemsDB } from '@/lib/db';
+import { qrScanTrackingService } from '@/services/qrScanTrackingService';
 import { toast } from 'sonner';
 
 export function useOfflineSync() {
@@ -16,6 +17,12 @@ export function useOfflineSync() {
 
             console.log(`🔄 Syncing ${queueItems.length} offline actions...`);
 
+            // Sync QR scans first
+            const qrScans = queueItems.filter(item => item.action === 'qr_scan');
+            if (qrScans.length > 0) {
+                await qrScanTrackingService.syncOfflineScans(qrScans);
+            }
+
             for (const item of queueItems) {
                 try {
                     // Process each queued action
@@ -24,6 +31,12 @@ export function useOfflineSync() {
                             // Sync email signup to Supabase
                             // This would call your actual API endpoint
                             console.log('Syncing email signup:', item.data);
+                            break;
+
+                        case 'qr_scan':
+                            // Sync QR scan logs to Supabase
+                            console.log('Syncing QR scan:', item.data);
+                            // The actual sync is handled by qrScanTrackingService
                             break;
 
                         case 'add_to_cart':

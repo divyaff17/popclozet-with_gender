@@ -24,6 +24,13 @@ export interface Product {
     isAvailable?: boolean;
     createdAt?: string;
     updatedAt?: string;
+    // Hygiene-related fields
+    fabricType?: string;
+    fabricHint?: string;
+    hygieneSopId?: string;
+    rentalCount?: number;
+    lastCleanedAt?: string;
+    conditionStatus?: 'excellent' | 'good' | 'fair' | 'needs_repair';
 }
 
 // IndexedDB Schema for offline storage
@@ -156,6 +163,13 @@ class ProductService {
             isAvailable: dbProduct.is_available,
             createdAt: dbProduct.created_at,
             updatedAt: dbProduct.updated_at,
+            // Hygiene fields
+            fabricType: dbProduct.fabric_type,
+            fabricHint: dbProduct.fabric_hint,
+            hygieneSopId: dbProduct.hygiene_sop_id,
+            rentalCount: dbProduct.rental_count,
+            lastCleanedAt: dbProduct.last_cleaned_at,
+            conditionStatus: dbProduct.condition_status,
         };
     }
 
@@ -350,6 +364,87 @@ class ProductService {
         } catch {
             return null;
         }
+    }
+
+    // Get products without hygiene SOPs
+    async getProductsWithoutSOPs(): Promise<Product[]> {
+        try {
+            const { data, error } = await (supabase as any)
+                .from('products')
+                .select('*')
+                .is('hygiene_sop_id', null)
+                .eq('is_available', true)
+                .order('created_at', { ascending: false });
+
+            if (error) throw error;
+            return (data || []).map(this.transformFromDB);
+        } catch (error) {
+            console.error('❌ Failed to get products without SOPs:', error);
+            // Fallback: filter from all products
+            const allProducts = await this.getAllProducts();
+            return allProducts.filter(p => !p.hygieneSopId);
+        }
+    }
+
+    // Get products without QR codes
+    async getProductsWithoutQRCodes(): Promise<Product[]> {
+        try {
+            // Get all products
+            const allProducts = await this.getAllProducts();
+            
+            // Get all product IDs that have QR codes
+            const { data: qrCodes, error } = await (supabase as any)
+                .from('product_qr_codes')
+                .select('product_id');
+
+            if (error) throw error;
+            
+            const productsWithQR = new Set((qrCodes || []).map((qr: any) => qr.product_id));
+            
+            // Return products that don't have QR codes
+            return allProducts.filter(p => !productsWithQR.has(p.id));
+        } catch (error) {
+            console.error('❌ Failed to get products without QR codes:', error);
+            return [];
+        }
+    }
+
+    // Extract category from product name or use event category as fallback
+    extractCategory(product: Product): string {
+        // Try to extract category from name (common clothing items)
+        const name = product.name.toLowerCase();
+        const categoryKeywords: Record<string, string> = {
+            'dress': 'dress',
+            'blazer': 'blazer',
+            'suit': 'suit',
+            'shirt': 'shirt',
+            'kurta': 'kurta',
+            'saree': 'saree',
+            'lehenga': 'lehenga',
+            'gown': 'gown',
+            'skirt': 'skirt',
+            'pants': 'pants',
+            'trousers': 'pants',
+            'jeans': 'jeans',
+            'jacket': 'jacket',
+            'coat': 'coat',
+            'top': 'top',
+            'blouse': 'blouse',
+            't-shirt': 't-shirt',
+            'tshirt': 't-shirt',
+            'sweater': 'sweater',
+            'hoodie': 'hoodie',
+        };
+
+        // Check for category keywords in name
+        for (const [keyword, category] of Object.entries(categoryKeywords)) {
+            if (name.includes(keyword)) {
+                return category;
+            }
+        }
+
+        // Fallback: use event category as category hint
+        return product.eventCategory || 'clothing';
     }
 }
 

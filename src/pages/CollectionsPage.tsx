@@ -150,6 +150,8 @@ const CollectionsPage: React.FC = () => {
   const [selectedMood, setSelectedMood] = useState<string>(moodId || "casual");
   const [isSignupOpen, setIsSignupOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [dbProducts, setDbProducts] = useState<any[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
 
   // Update selected mood when URL param changes
   useEffect(() => {
@@ -158,6 +160,30 @@ const CollectionsPage: React.FC = () => {
     }
   }, [moodId]);
 
+  // Fetch products from database when mood changes
+  useEffect(() => {
+    loadProductsFromDatabase();
+  }, [selectedMood]);
+
+  const loadProductsFromDatabase = async () => {
+    setIsLoadingProducts(true);
+    try {
+      // Import productService dynamically to avoid circular dependencies
+      const { productService } = await import('@/services/productService');
+
+      // Fetch products for the selected event category
+      const products = await productService.getProductsByEvent(selectedMood as any);
+
+      console.log(`📦 Loaded ${products.length} products from database for ${selectedMood}`);
+      setDbProducts(products);
+    } catch (error) {
+      console.error('❌ Failed to load products from database:', error);
+      setDbProducts([]);
+    } finally {
+      setIsLoadingProducts(false);
+    }
+  };
+
   const handleMoodChange = (newMood: string) => {
     setLoading(true);
     setSelectedMood(newMood);
@@ -165,7 +191,25 @@ const CollectionsPage: React.FC = () => {
     setTimeout(() => setLoading(false), 300);
   };
 
+  // Transform database products to match the Product interface expected by the UI
+  const transformDbProduct = (dbProduct: any): Product => {
+    return {
+      id: dbProduct.id,
+      title: dbProduct.name,
+      image: dbProduct.imageUrl || '/placeholder-product.jpg',
+      occasion: dbProduct.description || `Perfect for ${selectedMood} occasions`,
+      price: `₹${dbProduct.price}`,
+      rentalPrice: `₹${dbProduct.rentalPrice || Math.floor(dbProduct.price * 0.15)}`,
+    };
+  };
+
+  // Merge hardcoded products with database products
   const currentMoodData = MOOD_PRODUCTS[selectedMood] || MOOD_PRODUCTS.casual;
+  const transformedDbProducts = dbProducts.map(transformDbProduct);
+
+  // Combine both sources - database products first (newest inventory), then hardcoded
+  const allProducts = [...transformedDbProducts, ...currentMoodData.products];
+
   const currentOccasion = OCCASIONS.find(o => o.id === selectedMood);
 
   return (
@@ -233,7 +277,12 @@ const CollectionsPage: React.FC = () => {
                   {currentMoodData.title} Collection
                 </h2>
                 <p className="text-black/60 dark:text-[#FAFAFA]/60">
-                  {currentMoodData.products.length} curated outfits for your {currentMoodData.title.toLowerCase()} occasions
+                  {allProducts.length} curated outfits for your {currentMoodData.title.toLowerCase()} occasions
+                  {dbProducts.length > 0 && (
+                    <span className="ml-2 text-green-600 dark:text-green-400 font-semibold">
+                      ({dbProducts.length} new arrivals!)
+                    </span>
+                  )}
                 </p>
               </div>
             </motion.div>
@@ -261,7 +310,7 @@ const CollectionsPage: React.FC = () => {
                   transition={{ duration: 0.3 }}
                   className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 md:gap-6"
                 >
-                  {currentMoodData.products.map((product, index) => (
+                  {allProducts.map((product, index) => (
                     <motion.div
                       key={product.id}
                       initial={{ opacity: 0, y: 20 }}

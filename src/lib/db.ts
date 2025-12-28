@@ -29,7 +29,7 @@ interface PopClozetDB extends DBSchema {
         key: number;
         value: {
             id?: number;
-            action: 'add_to_cart' | 'remove_from_cart' | 'add_to_wishlist' | 'remove_from_wishlist' | 'email_signup';
+            action: 'add_to_cart' | 'remove_from_cart' | 'add_to_wishlist' | 'remove_from_wishlist' | 'email_signup' | 'qr_scan';
             data: any;
             timestamp: number;
             synced: boolean;
@@ -43,7 +43,7 @@ interface PopClozetDB extends DBSchema {
 }
 
 const DB_NAME = 'PopClozet';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbInstance: IDBPDatabase<PopClozetDB> | null = null;
 
@@ -178,7 +178,7 @@ export async function getCachedProductDB(id: string) {
 
 // Offline queue operations
 export async function addToOfflineQueueDB(
-    action: 'add_to_cart' | 'remove_from_cart' | 'add_to_wishlist' | 'remove_from_wishlist' | 'email_signup',
+    action: 'add_to_cart' | 'remove_from_cart' | 'add_to_wishlist' | 'remove_from_wishlist' | 'email_signup' | 'qr_scan',
     data: any
 ) {
     const db = await initDB();
@@ -278,4 +278,94 @@ if (typeof window !== 'undefined') {
     }).catch((error) => {
         console.error('Failed to initialize IndexedDB:', error);
     });
+}
+
+// Cleanup and optimization operations
+export async function cleanupOldCache(maxAgeMs: number = 7 * 24 * 60 * 60 * 1000): Promise<number> {
+    try {
+        const db = await initDB();
+        const allProducts = await db.getAll('products');
+        const now = Date.now();
+        let deletedCount = 0;
+
+        for (const product of allProducts) {
+            if (now - product.cachedAt > maxAgeMs) {
+                await db.delete('products', product.id);
+                deletedCount++;
+            }
+        }
+
+        console.log(`✅ Cleaned up ${deletedCount} old cached products`);
+        return deletedCount;
+    } catch (error) {
+        console.error('Failed to cleanup old cache:', error);
+        return 0;
+    }
+}
+
+export async function optimizeDatabase(): Promise<void> {
+    try {
+        // Clear synced queue items
+        await clearSyncedQueueItemsDB();
+
+        // Clean old cache
+        await cleanupOldCache();
+
+        console.log('✅ Database optimized');
+    } catch (error) {
+        console.error('Failed to optimize database:', error);
+    }
+}
+
+export async function getCacheSize(): Promise<{
+    products: number;
+    cart: number;
+    wishlist: number;
+    queue: number;
+}> {
+    try {
+        const db = await initDB();
+
+        const [products, cart, wishlist, queue] = await Promise.all([
+            db.getAll('products'),
+            db.getAll('cart'),
+            db.getAll('wishlist'),
+            db.getAll('offlineQueue'),
+        ]);
+
+        return {
+            products: products.length,
+            cart: cart.length,
+            wishlist: wishlist.length,
+            queue: queue.length,
+        };
+    } catch (error) {
+        console.error('Failed to get cache size:', error);
+        return { products: 0, cart: 0, wishlist: 0, queue: 0 };
+    }
+}
+
+export async function getStorageEstimate(): Promise<{
+    usage: number;
+    quota: number;
+    percentage: number;
+} | null> {
+    try {
+        if ('storage' in navigator && 'estimate' in navigator.storage) {
+            const estimate = await navigator.storage.estimate();
+            const usage = estimate.usage || 0;
+            const quota = estimate.quota || 0;
+            const percentage = quota > 0 ? (usage / quota) * 100 : 0;
+
+            return {
+                usage,
+                quota,
+                percentage,
+            };
+        }
+        return null;
+    } catch (error) {
+        console.error('Failed to get storage estimate:', error);
+        return null;
+    }
 }
